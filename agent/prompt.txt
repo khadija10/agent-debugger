@@ -1,0 +1,9 @@
+Voici le code du script Python et l'erreur qu'il génère.
+
+Code :
+{code}
+
+Erreur :
+{error}
+
+Propose une correction au format JSON.
