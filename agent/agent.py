@@ -7,20 +7,35 @@ from groq import Groq
 import sys
 
 # =========================
-# Vérifier argument
+# 0) Charger configuration depuis config.json
 # =========================
-if len(sys.argv) != 2:
-    print("Usage : python agent.py chemin_du_script.py")
-    sys.exit(1)
+config_file = "agent/config.json"
+project_path = None
+python_interpreter = "python"
 
-script_to_run = sys.argv[1]
+if os.path.exists(config_file):
+    with open(config_file, "r", encoding="utf-8") as f:
+        config = json.load(f)
+        project_path = config.get("project_path")
+        python_interpreter = config.get("venv_path", "python")
+
+# =========================
+# 1) Vérifier argument ou config
+# =========================
+if len(sys.argv) == 2:
+    script_to_run = sys.argv[1]
+elif project_path:
+    script_to_run = os.path.join(project_path, "scripts/script_a.py")
+else:
+    print("Usage : python agent.py chemin_du_script.py (ou config.json existante)")
+    sys.exit(1)
 
 if not os.path.exists(script_to_run):
     print(f"❌ Fichier cible introuvable : {script_to_run}")
     sys.exit(1)
 
 # =========================
-# 1) Charger la clé API
+# 2) Charger la clé API Groq
 # =========================
 load_dotenv()
 api_key = os.getenv("GROQ_API_KEY")
@@ -30,14 +45,14 @@ if not api_key:
 client = Groq(api_key=api_key)
 
 # =========================
-# 2) Chemins pour agent
+# 3) Chemins pour agent
 # =========================
 context_file = "agent/context.txt"
 prompt_file = "agent/prompt.txt"
 json_output = "agent/last_patch.json"
 
 # =========================
-# 3) Lire le contexte et la prompt
+# 4) Lire contexte et prompt
 # =========================
 with open(context_file, "r", encoding="utf-8") as f:
     context_text = f.read()
@@ -46,10 +61,10 @@ with open(prompt_file, "r", encoding="utf-8") as f:
     prompt_template = f.read()
 
 # =========================
-# 4) Exécuter le script cible
+# 5) Exécuter le script cible
 # =========================
 completed = subprocess.run(
-    ["python", script_to_run],
+    [python_interpreter, script_to_run],
     capture_output=True,
     text=True
 )
@@ -61,21 +76,21 @@ if not error_content:
     print("🎉 Aucune erreur détectée dans le script.")
     exit()
 
-print("❗ Erreur détectée :")
+# Windows safe print
+print("Erreur détectée :")
 print(error_content)
 
 # =========================
-# 5) Construire la prompt
+# 6) Construire la prompt
 # =========================
 prompt_filled = prompt_template.format(code=code_content, error=error_content)
-
 messages = [
     {"role": "system", "content": context_text},
     {"role": "user", "content": prompt_filled}
 ]
 
 # =========================
-# 6) Appel Groq
+# 7) Appel Groq pour obtenir le patch
 # =========================
 completion = client.chat.completions.create(
     model="llama-3.1-8b-instant",
@@ -85,17 +100,17 @@ completion = client.chat.completions.create(
 )
 
 response = completion.choices[0].message.content
-print("\n📩 Réponse JSON du modèle :")
+print("\nRéponse JSON du modèle :")
 print(response)
 
 # =========================
-# 7) Sauvegarder le JSON
+# 8) Sauvegarder le JSON
 # =========================
 with open(json_output, "w", encoding="utf-8") as f:
     f.write(response)
 
 # =========================
-# 8) Parser le JSON
+# 9) Parser le JSON
 # =========================
 try:
     patch_data = json.loads(response)
@@ -109,7 +124,7 @@ if not patch_code:
     exit()
 
 # =========================
-# 9) Appliquer le patch ligne par ligne (étape 6)
+# 10) Appliquer le patch uniquement sur la fonction ciblée
 # =========================
 backup_file = script_to_run + ".bak"
 copyfile(script_to_run, backup_file)
@@ -118,14 +133,38 @@ print(f"💾 Backup du fichier original créé : {backup_file}")
 with open(script_to_run, "r", encoding="utf-8") as f:
     original_lines = f.readlines()
 
-patched_lines = patch_code.splitlines(keepends=True)
+# Préparer les lignes du patch
+patched_lines = [line + "\n" for line in patch_code.splitlines()]
 
-new_lines = []
-max_len = max(len(original_lines), len(patched_lines))
-for i in range(max_len):
-    patched_line = patched_lines[i] if i < len(patched_lines) else ""
-    orig_line = original_lines[i] if i < len(original_lines) else ""
-    new_lines.append(patched_line if patched_line != orig_line else orig_line)
+# Identifier le nom de la fonction du patch
+first_line = patched_lines[0].strip()
+if first_line.startswith("def "):
+    func_name = first_line.split()[1].split("(")[0]
+else:
+    func_name = None
+
+if func_name:
+    # Trouver la fonction correspondante dans l'original
+    start_index = None
+    for i, line in enumerate(original_lines):
+        if line.strip().startswith(f"def {func_name}("):
+            start_index = i
+            break
+
+    if start_index is not None:
+        # Trouver la fin de la fonction existante
+        end_index = start_index + 1
+        while end_index < len(original_lines) and (original_lines[end_index].startswith(' ') or original_lines[end_index].startswith('\t')):
+            end_index += 1
+        # Remplacer uniquement la fonction
+        new_lines = original_lines[:start_index] + patched_lines + original_lines[end_index:]
+    else:
+        # Fonction non trouvée → ajouter le patch à la fin du fichier
+        new_lines = original_lines + ["\n"] + patched_lines
+else:
+    # Pas de fonction détectée dans le patch → ne rien modifier
+    print("⚠️ Patch ne contient pas de fonction identifiable, aucun changement effectué.")
+    new_lines = original_lines
 
 with open(script_to_run, "w", encoding="utf-8") as f:
     f.writelines(new_lines)
@@ -133,11 +172,11 @@ with open(script_to_run, "w", encoding="utf-8") as f:
 print(f"\n✅ Patch appliqué au fichier : {script_to_run}")
 
 # =========================
-# 10) Relancer le script corrigé
+# 11) Relancer le script corrigé
 # =========================
 print("\n🔄 Exécution du script corrigé...\n")
 completed_after = subprocess.run(
-    ["python", script_to_run],
+    [python_interpreter, script_to_run],
     capture_output=True,
     text=True
 )
