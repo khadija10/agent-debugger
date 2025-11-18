@@ -1,0 +1,5 @@
+{
+  "diagnostic": "La fonction division() ne gère pas le cas où le diviseur est égal à zéro, provoquant une erreur ZeroDivisionError.",
+  "patch": "def division(a, b):\n    if b == 0:\n        raise ValueError('Division par zéro non autorisée')\n    return a / b",
+  "confidence": 1.0
+}
