@@ -1,94 +1,93 @@
 import os
 from shutil import copyfile
 
-def apply_patch(script_path: str, patch_code: str):
+def apply_patch(file_path: str, patch_code: str, project_path: str):
     """
-    Applique un patch MINIMAL :
-    - Ne remplace que la fonction corrigée
-    - Ignore TOUT ce qui est en dehors de la fonction (ex: result = ...)
-    - Place les sauvegardes dans scripts/backups/
+    Applique un patch minimal :
+    - Le patch doit contenir UNE SEULE fonction complète (débutant par "def")
+    - On remplace UNIQUEMENT cette fonction dans le fichier cible
+    - Aucun code global n'est modifié
+    - Le backup est déplacé dans scripts/backups/
     """
 
-    if not os.path.exists(script_path):
-        raise FileNotFoundError(f"Script introuvable : {script_path}")
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Fichier introuvable : {file_path}")
 
-    # ===========================
-    # 1) Créer dossier backups
-    # ===========================
-    script_dir = os.path.dirname(script_path)
-    backup_dir = os.path.join(script_dir, "backups")
+    # ============================
+    # 1) Préparation du dossier backups
+    # ============================
+    backup_dir = os.path.join(project_path, "scripts", "backups")
+    os.makedirs(backup_dir, exist_ok=True)
 
-    if not os.path.exists(backup_dir):
-        os.makedirs(backup_dir)
+    base_name = os.path.basename(file_path)
+    backup_path = os.path.join(backup_dir, base_name + ".bak")
 
-    script_name = os.path.basename(script_path)
-    backup_path = os.path.join(backup_dir, script_name + ".bak")
-
-    # Sauvegarde propre
-    copyfile(script_path, backup_path)
+    # Backup
+    copyfile(file_path, backup_path)
     print(f"💾 Backup créé : {backup_path}")
 
-    # ===========================
-    # 2) Lire fichier original
-    # ===========================
-    with open(script_path, "r", encoding="utf-8") as f:
-        original = f.readlines()
+    # ============================
+    # 2) Lire le fichier original
+    # ============================
+    with open(file_path, "r", encoding="utf-8") as f:
+        original_lines = f.readlines()
 
-    # ===========================
+    # ============================
     # 3) Extraire la fonction du patch
-    # ===========================
+    # ============================
     patch_lines = patch_code.splitlines()
 
-    func_start = None
+    # Trouver le def
+    func_start_idx = None
     for i, line in enumerate(patch_lines):
         if line.strip().startswith("def "):
-            func_start = i
+            func_start_idx = i
             break
 
-    if func_start is None:
-        print("❌ Patch invalide : aucune fonction trouvée")
+    if func_start_idx is None:
+        print("❌ Patch invalide : aucune fonction trouvée.")
         return False
 
-    func_name = patch_lines[func_start].strip().split()[1].split("(")[0]
-
-    # extraire uniquement le bloc de fonction
-    func_block = []
-    for line in patch_lines[func_start:]:
-        if line.startswith("def ") and len(func_block) > 0:
+    full_func = []
+    for line in patch_lines[func_start_idx:]:
+        if line.startswith("def ") and len(full_func) > 0:
             break
-        func_block.append(line)
+        full_func.append(line)
 
-    patched = [(l if l.endswith("\n") else l + "\n") for l in func_block]
+    # Ajouter \n à chaque ligne
+    full_func = [(l if l.endswith("\n") else l + "\n") for l in full_func]
 
-    # ===========================
-    # 4) Localiser la fonction originale
-    # ===========================
+    # Nom de la fonction
+    func_name = patch_lines[func_start_idx].strip().split()[1].split("(")[0]
+
+    # ============================
+    # 4) Trouver la fonction dans le fichier original
+    # ============================
     start = None
-    for i, line in enumerate(original):
+    for i, line in enumerate(original_lines):
         if line.strip().startswith(f"def {func_name}("):
             start = i
             break
 
     if start is None:
-        print(f"⚠️ Fonction {func_name} introuvable → ajout à la fin.")
-        new = original + ["\n"] + patched
-
+        print(f"⚠️ Fonction {func_name} non trouvée → ajout à la fin.")
+        new_lines = original_lines + ["\n"] + full_func
     else:
-        # trouver fin du bloc existant
+        # Trouver la fin du bloc
         end = start + 1
-        while end < len(original) and (
-            original[end].startswith(" ") or original[end].startswith("\t")
+        while end < len(original_lines) and (
+            original_lines[end].startswith(" ") or original_lines[end].startswith("\t")
         ):
             end += 1
 
-        # Remplacement propre
-        new = original[:start] + patched + original[end:]
+        new_lines = original_lines[:start] + full_func + original_lines[end:]
 
-    # ===========================
-    # 5) Écrire fichier final
-    # ===========================
-    with open(script_path, "w", encoding="utf-8") as f:
-        f.writelines(new)
+    # ============================
+    # 5) Écriture du fichier corrigé
+    # ============================
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.writelines(new_lines)
 
-    print(f"✅ Fonction {func_name} corrigée dans {script_path}")
+    print(f"✅ Fonction {func_name} remplacée dans {file_path}")
+
     return True
