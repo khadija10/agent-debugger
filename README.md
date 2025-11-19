@@ -5,24 +5,8 @@ agent de debugging automatique
 
 Le schéma suivant illustre le fonctionnement général de l'agent de débogage automatique :
 
-```
-[Interface de configuration]
-           |
-           v
-[Exécuter le script cible dans un environnement virtuel]
-           |
-           v
-[Capturer les erreurs d'exécution]
-           |
-           v
-[Envoyer le code + l'erreur au modèle IA]
-           |
-           v
-[Recevoir les propositions de correction en JSON]
-           |
-           v
-[Afficher ou appliquer les corrections]
-```
+<img width="293" height="344" alt="Diagramme sans nom drawio" src="https://github.com/user-attachments/assets/5d103bf5-70a2-46a3-a7aa-0747326470ef" />
+
 
 ### Description des composants :
 - **Interface de configuration** : Permet aux utilisateurs de configurer les paramètres du processus de débogage, tels que les chemins des scripts, les paramètres d'environnement virtuel et les configurations du modèle IA.
@@ -216,6 +200,7 @@ Voici une description de l'interface proposée, utilisant Streamlit :
   - Affichage de l'erreur détectée (stderr) dans une boîte de code.
   - Affichage des corrections proposées (contenu du JSON `last_patch.json`) dans une boîte de code.
   - Option pour appliquer la correction automatiquement (bouton supplémentaire, si confiance élevée).
+<img width="4293" height="818" alt="Untitled diagram-2025-11-19-091246" src="https://github.com/user-attachments/assets/f8bf0e48-7cd3-4078-a7f5-8a854e39772b" />
 
 Cette interface rend l'outil accessible et intuitif, permettant une configuration facile et un suivi visuel des erreurs et corrections.
 
