@@ -1,10 +1,10 @@
 import os
 import json
 import subprocess
-from shutil import copyfile
 from dotenv import load_dotenv
 from groq import Groq
 import sys
+from apply_patch import apply_patch
 
 # =========================
 # 0) Charger configuration depuis config.json
@@ -31,7 +31,7 @@ else:
     sys.exit(1)
 
 if not os.path.exists(script_to_run):
-    print(f"❌ Fichier cible introuvable : {script_to_run}")
+    print(f"Fichier cible introuvable : {script_to_run}")
     sys.exit(1)
 
 # =========================
@@ -73,11 +73,10 @@ code_content = open(script_to_run, "r", encoding="utf-8").read()
 error_content = completed.stderr.strip()
 
 if not error_content:
-    print("🎉 Aucune erreur détectée dans le script.")
+    print("Aucune erreur détectée dans le script.")
     exit()
 
-# Windows safe print
-print("Erreur détectée :")
+print("Erreur détectée dans le script :")
 print(error_content)
 
 # =========================
@@ -100,11 +99,12 @@ completion = client.chat.completions.create(
 )
 
 response = completion.choices[0].message.content
+
 print("\nRéponse JSON du modèle :")
 print(response)
 
 # =========================
-# 8) Sauvegarder le JSON
+# 8) Sauvegarder la réponse JSON brute
 # =========================
 with open(json_output, "w", encoding="utf-8") as f:
     f.write(response)
@@ -115,66 +115,40 @@ with open(json_output, "w", encoding="utf-8") as f:
 try:
     patch_data = json.loads(response)
 except json.JSONDecodeError:
-    print("❌ Le modèle n'a pas renvoyé un JSON valide !")
+    print("Le modèle n'a pas renvoyé un JSON valide.")
     exit()
 
 patch_code = patch_data.get("patch")
 if not patch_code:
-    print("❌ Aucun patch trouvé dans la réponse.")
+    print("Aucun patch trouvé dans la réponse.")
     exit()
 
 # =========================
-# 10) Appliquer le patch uniquement sur la fonction ciblée
+# 10) Vérification : le patch doit contenir UNIQUEMENT la fonction corrigée
 # =========================
-backup_file = script_to_run + ".bak"
-copyfile(script_to_run, backup_file)
-print(f"💾 Backup du fichier original créé : {backup_file}")
+lines = [l.strip() for l in patch_code.splitlines() if l.strip()]
 
-with open(script_to_run, "r", encoding="utf-8") as f:
-    original_lines = f.readlines()
+# doit commencer par def
+if not lines[0].startswith("def "):
+    print("Patch invalide : doit commencer par une définition de fonction.")
+    exit()
 
-# Préparer les lignes du patch
-patched_lines = [line + "\n" for line in patch_code.splitlines()]
-
-# Identifier le nom de la fonction du patch
-first_line = patched_lines[0].strip()
-if first_line.startswith("def "):
-    func_name = first_line.split()[1].split("(")[0]
-else:
-    func_name = None
-
-if func_name:
-    # Trouver la fonction correspondante dans l'original
-    start_index = None
-    for i, line in enumerate(original_lines):
-        if line.strip().startswith(f"def {func_name}("):
-            start_index = i
-            break
-
-    if start_index is not None:
-        # Trouver la fin de la fonction existante
-        end_index = start_index + 1
-        while end_index < len(original_lines) and (original_lines[end_index].startswith(' ') or original_lines[end_index].startswith('\t')):
-            end_index += 1
-        # Remplacer uniquement la fonction
-        new_lines = original_lines[:start_index] + patched_lines + original_lines[end_index:]
-    else:
-        # Fonction non trouvée → ajouter le patch à la fin du fichier
-        new_lines = original_lines + ["\n"] + patched_lines
-else:
-    # Pas de fonction détectée dans le patch → ne rien modifier
-    print("⚠️ Patch ne contient pas de fonction identifiable, aucun changement effectué.")
-    new_lines = original_lines
-
-with open(script_to_run, "w", encoding="utf-8") as f:
-    f.writelines(new_lines)
-
-print(f"\n✅ Patch appliqué au fichier : {script_to_run}")
+# aucun code global autorisé
+for line in lines:
+    if line.startswith("print(") or "=" in line and "def " not in line:
+        if not line.startswith(("def ", "return", "if ", "elif ", "else:", "#", "@")):
+            print("Patch invalide : contient du code global ou des affectations hors fonction.")
+            exit()
 
 # =========================
-# 11) Relancer le script corrigé
+# 11) Appliquer le patch minimal
 # =========================
-print("\n🔄 Exécution du script corrigé...\n")
+apply_patch(script_to_run, patch_code)
+
+# =========================
+# 12) Relancer le script corrigé
+# =========================
+print("\n=== Exécution du script corrigé ===\n")
 completed_after = subprocess.run(
     [python_interpreter, script_to_run],
     capture_output=True,

@@ -1,4 +1,4 @@
-Voici le code du script Python et l'erreur qu'il génère.
+Voici le code complet du script Python et l'erreur qu'il génère.
 
 Code :
 {code}
@@ -6,4 +6,5 @@ Code :
 Erreur :
 {error}
 
-Propose une correction au format JSON.
+Fournis un correctif AU FORMAT JSON STRICT.
+Le champ "patch" doit contenir EXCLUSIVEMENT la fonction corrigée, et rien d'autre.
