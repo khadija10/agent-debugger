@@ -1,9 +1,1 @@
-# script_a.py
-def division(a, b):
-    return a / b
-
-result = division(5, 1)  # ZeroDivisionError ici
-print("Résultat =", result)
-
-result = division(5, 1)  # ZeroDivisionError ici
-print("Résultat =", result)
+"def load_values():\n    # ERREUR 1 : mauvaise variable \u2192 NameError\n    nums = [5, 10, 0, 20]\n    return nums  # <-- correction\n\n\ndef compute_ratio(a, b):\n    # ERREUR 2 : division non protégée \u2192 ZeroDivisionError\n    if b != 0:\n        return a / b\n    else:\n        return None\n\n\ndef summarize(values):\n    total = 0  # correction de l'indentation\n\n    for v in values:\n        total += v\n\n    # ERREUR 4 : fonction inexistante\n    summary = str(total)  # correction\n\n    return summary\n\n\ndef display(values):\n    ratio = compute_ratio(values[0], values[1])  # correction de l'index\n\n    # ERREUR 5 : typo \u2192 NameError\n    print("Ratio calculé:", ratio)\n\n    # ERREUR 6 : SyntaxError discrète\n    print("Liste des valeurs:", values)\n\n# -----------------------------\n# PROGRAMME PRINCIPAL\n# -----------------------------\nif __name__ == "__main__":\n    data = load_values()\n    display(data)"

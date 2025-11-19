@@ -1,0 +1,41 @@
+"def load_values():
+    # ERREUR 1 : mauvaise variable → NameError
+    nums = [5, 10, 0, 20]
+    return nums  # <-- correction
+
+
+def compute_ratio(a, b):
+    # ERREUR 2 : division non protégée → ZeroDivisionError
+    if b != 0:
+        return a / b
+    else:
+        return None
+
+
+def summarize(values):
+    total = 0  # correction de l'indentation
+
+    for v in values:
+        total += v
+
+    # ERREUR 4 : fonction inexistante
+    summary = str(total)  # correction
+
+    return summary
+
+
+def display(values):
+    ratio = compute_ratio(values[0], values[1])  # correction de l'index
+
+    # ERREUR 5 : typo → NameError
+    print("Ratio calculé:", ratio)
+
+    # ERREUR 6 : SyntaxError discrète
+    print("Liste des valeurs:", values)
+
+# -----------------------------
+# PROGRAMME PRINCIPAL
+# -----------------------------
+if __name__ == "__main__":
+    data = load_values()
+    display(data)"

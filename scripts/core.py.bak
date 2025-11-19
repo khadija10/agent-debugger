@@ -1,0 +1,5 @@
+from math_tools import multiply, divide
+
+def compute(a, b):
+    # BUG : mauvaise fonction utilisée
+    return multiply(a, b) + divde(a, b)  # <-- 'divde' est faux

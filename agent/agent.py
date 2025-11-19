@@ -1,67 +1,67 @@
 import os
+import sys
 import json
 import subprocess
+import re
 from shutil import copyfile
 from dotenv import load_dotenv
 from groq import Groq
-import sys
 
 # =========================
-# 0) Charger configuration depuis config.json
+# 0) Chargement de la config
 # =========================
-config_file = "agent/config.json"
-project_path = None
-python_interpreter = "python"
+CONFIG_PATH = "agent/config.json"
+CONTEXT_PATH = "agent/context.txt"
+PROMPT_PATH = "agent/prompt.txt"
+OUTPUT_JSON = "agent/last_patch.json"
 
-if os.path.exists(config_file):
-    with open(config_file, "r", encoding="utf-8") as f:
-        config = json.load(f)
-        project_path = config.get("project_path")
-        python_interpreter = config.get("venv_path", "python")
+if not os.path.exists(CONFIG_PATH):
+    print("❌ agent/config.json introuvable")
+    sys.exit(1)
+
+with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+    config = json.load(f)
+
+project_path = config.get("project_path")
+python_interpreter = config.get("venv_path", "python")
+
+if not project_path or not os.path.exists(project_path):
+    print("❌ project_path invalide dans config.json")
+    sys.exit(1)
 
 # =========================
-# 1) Vérifier argument ou config
+# 1) Fichier cible
 # =========================
 if len(sys.argv) == 2:
     script_to_run = sys.argv[1]
-elif project_path:
-    script_to_run = os.path.join(project_path, "scripts/script_a.py")
 else:
-    print("Usage : python agent.py chemin_du_script.py (ou config.json existante)")
-    sys.exit(1)
+    script_to_run = os.path.join(project_path, "scripts", "script_a.py")
 
 if not os.path.exists(script_to_run):
-    print(f"❌ Fichier cible introuvable : {script_to_run}")
+    print(f"❌ Fichier introuvable : {script_to_run}")
     sys.exit(1)
 
 # =========================
-# 2) Charger la clé API Groq
+# 2) Clé API
 # =========================
 load_dotenv()
 api_key = os.getenv("GROQ_API_KEY")
 if not api_key:
-    raise ValueError("GROQ_API_KEY non trouvé dans .env")
+    raise ValueError("GROQ_API_KEY manquant")
 
 client = Groq(api_key=api_key)
 
 # =========================
-# 3) Chemins pour agent
+# 3) Charger contexte + prompt template
 # =========================
-context_file = "agent/context.txt"
-prompt_file = "agent/prompt.txt"
-json_output = "agent/last_patch.json"
-
-# =========================
-# 4) Lire contexte et prompt
-# =========================
-with open(context_file, "r", encoding="utf-8") as f:
+with open(CONTEXT_PATH, "r", encoding="utf-8") as f:
     context_text = f.read()
 
-with open(prompt_file, "r", encoding="utf-8") as f:
+with open(PROMPT_PATH, "r", encoding="utf-8") as f:
     prompt_template = f.read()
 
 # =========================
-# 5) Exécuter le script cible
+# 4) Exécution initiale
 # =========================
 completed = subprocess.run(
     [python_interpreter, script_to_run],
@@ -69,119 +69,149 @@ completed = subprocess.run(
     text=True
 )
 
-code_content = open(script_to_run, "r", encoding="utf-8").read()
-error_content = completed.stderr.strip()
+stderr_text = completed.stderr.strip()
 
-if not error_content:
-    print("🎉 Aucune erreur détectée dans le script.")
-    exit()
+if not stderr_text:
+    print("🎉 Aucune erreur détectée.")
+    sys.exit(0)
 
-# Windows safe print
-print("Erreur détectée :")
-print(error_content)
+print("=== Erreur détectée ===")
+print(stderr_text)
 
 # =========================
-# 6) Construire la prompt
+# 5) Identifier le fichier fautif
 # =========================
-prompt_filled = prompt_template.format(code=code_content, error=error_content)
+matches = re.findall(r'File "(.+?\.py)"', stderr_text)
+faulty_file = matches[-1] if matches else script_to_run
+
+print(f"\n📌 Fichier fautif : {faulty_file}")
+
+if not os.path.isabs(faulty_file):
+    faulty_file = os.path.join(project_path, faulty_file)
+
+if not os.path.exists(faulty_file):
+    print("❌ Fichier fautif introuvable")
+    sys.exit(1)
+
+# =========================
+# 6) Charger code fautif + construire prompt
+# =========================
+with open(faulty_file, "r", encoding="utf-8") as f:
+    faulty_code = f.read()
+
+prompt_filled = prompt_template.format(code=faulty_code, error=stderr_text)
+
 messages = [
     {"role": "system", "content": context_text},
-    {"role": "user", "content": prompt_filled}
+    {"role": "user", "content": prompt_filled},
 ]
 
 # =========================
-# 7) Appel Groq pour obtenir le patch
+# 7) Appel modèle
 # =========================
 completion = client.chat.completions.create(
     model="llama-3.1-8b-instant",
     messages=messages,
-    max_tokens=500,
+    max_tokens=1500,
     temperature=0
 )
 
-response = completion.choices[0].message.content
-print("\nRéponse JSON du modèle :")
-print(response)
+response_text = completion.choices[0].message.content
+print("\n=== Réponse brute du modèle ===")
+print(response_text)
+
+with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
+    f.write(response_text)
 
 # =========================
-# 8) Sauvegarder le JSON
-# =========================
-with open(json_output, "w", encoding="utf-8") as f:
-    f.write(response)
-
-# =========================
-# 9) Parser le JSON
+# 8) Parser le JSON
 # =========================
 try:
-    patch_data = json.loads(response)
-except json.JSONDecodeError:
-    print("❌ Le modèle n'a pas renvoyé un JSON valide !")
-    exit()
+    patch_data = json.loads(response_text)
+except:
+    print("❌ Le modèle n'a pas renvoyé un JSON valide.")
+    sys.exit(1)
 
 patch_code = patch_data.get("patch")
+diagnostic = patch_data.get("diagnostic", "")
+
 if not patch_code:
-    print("❌ Aucun patch trouvé dans la réponse.")
-    exit()
+    print("❌ Pas de champ 'patch' dans la réponse.")
+    sys.exit(1)
 
 # =========================
-# 10) Appliquer le patch uniquement sur la fonction ciblée
+# 8.5 Déséchappage agressif si patch encodé
 # =========================
-backup_file = script_to_run + ".bak"
-copyfile(script_to_run, backup_file)
-print(f"💾 Backup du fichier original créé : {backup_file}")
+def aggressively_unescape_patch(text):
+    """ Convertit une string JSON échappée en code Python lisible """
 
-with open(script_to_run, "r", encoding="utf-8") as f:
-    original_lines = f.readlines()
+    # cas évident : contient \n ou \"
+    if "\\n" in text or "\\\"" in text or "\\t" in text:
+        try:
+            return json.loads(text)
+        except:
+            pass
 
-# Préparer les lignes du patch
-patched_lines = [line + "\n" for line in patch_code.splitlines()]
+    # si le patch commence ET finit par un guillemet → string JSON
+    if (text.startswith('"') and text.endswith('"')) or \
+       (text.startswith("'") and text.endswith("'")):
+        try:
+            return json.loads(text)
+        except:
+            pass
 
-# Identifier le nom de la fonction du patch
-first_line = patched_lines[0].strip()
-if first_line.startswith("def "):
-    func_name = first_line.split()[1].split("(")[0]
-else:
-    func_name = None
+    return text
 
-if func_name:
-    # Trouver la fonction correspondante dans l'original
-    start_index = None
-    for i, line in enumerate(original_lines):
-        if line.strip().startswith(f"def {func_name}("):
-            start_index = i
-            break
 
-    if start_index is not None:
-        # Trouver la fin de la fonction existante
-        end_index = start_index + 1
-        while end_index < len(original_lines) and (original_lines[end_index].startswith(' ') or original_lines[end_index].startswith('\t')):
-            end_index += 1
-        # Remplacer uniquement la fonction
-        new_lines = original_lines[:start_index] + patched_lines + original_lines[end_index:]
-    else:
-        # Fonction non trouvée → ajouter le patch à la fin du fichier
-        new_lines = original_lines + ["\n"] + patched_lines
-else:
-    # Pas de fonction détectée dans le patch → ne rien modifier
-    print("⚠️ Patch ne contient pas de fonction identifiable, aucun changement effectué.")
-    new_lines = original_lines
+patch_code = aggressively_unescape_patch(patch_code)
 
-with open(script_to_run, "w", encoding="utf-8") as f:
-    f.writelines(new_lines)
-
-print(f"\n✅ Patch appliqué au fichier : {script_to_run}")
+# Sécurité : si encore échappé, on réessaye une seconde fois
+if "\\n" in patch_code:
+    try:
+        patch_code = json.loads(patch_code)
+    except:
+        pass
 
 # =========================
-# 11) Relancer le script corrigé
+# 9) Affichage + Confirmation utilisateur
 # =========================
-print("\n🔄 Exécution du script corrigé...\n")
+print("\n=== CORRECTION PROPOSÉE ===")
+print("\n--- Diagnostic ---")
+print(diagnostic)
+print("\n--- Patch complet ---\n")
+print(patch_code)
+print("\n------------------------------------------\n")
+
+confirm = input("Appliquer la correction ? (o/n) : ").strip().lower()
+if confirm not in ("o", "oui", "y"):
+    print("❌ Correction annulée.")
+    sys.exit(0)
+
+# =========================
+# 10) Sauvegarde + écrasement
+# =========================
+backup_file = faulty_file + ".bak"
+copyfile(faulty_file, backup_file)
+print(f"\n💾 Backup sauvegardé : {backup_file}")
+
+with open(faulty_file, "w", encoding="utf-8") as f:
+    f.write(patch_code)
+    if not patch_code.endswith("\n"):
+        f.write("\n")
+
+print(f"✅ Patch appliqué : {faulty_file}")
+
+# =========================
+# 11) Réexécution
+# =========================
+print("\n🔄 Re-exécution...\n")
 completed_after = subprocess.run(
     [python_interpreter, script_to_run],
     capture_output=True,
     text=True
 )
 
-print("== stdout ==")
+print("=== stdout ===")
 print(completed_after.stdout)
-print("== stderr ==")
+print("=== stderr ===")
 print(completed_after.stderr)

@@ -1,0 +1,5 @@
+from test import compute   # <- boucle infinie !
+
+def helper(x):
+    return x * 2
+from test import compute
