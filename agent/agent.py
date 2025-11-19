@@ -5,7 +5,7 @@ import subprocess
 import re
 from dotenv import load_dotenv
 from groq import Groq
-from apply_patch import apply_patch
+from apply_patch import apply_patch  # <-- Import de la fonction patch
 
 # =========================
 # 0) Chargement de la config
@@ -42,7 +42,7 @@ if not os.path.exists(script_to_run):
     sys.exit(1)
 
 # =========================
-# 2) API KEY
+# 2) Clé API
 # =========================
 load_dotenv()
 api_key = os.getenv("GROQ_API_KEY")
@@ -61,7 +61,7 @@ with open(PROMPT_PATH, "r", encoding="utf-8") as f:
     prompt_template = f.read()
 
 # =========================
-# 4) Exécution du script cible
+# 4) Exécution initiale
 # =========================
 completed = subprocess.run(
     [python_interpreter, script_to_run],
@@ -86,7 +86,6 @@ faulty_file = matches[-1] if matches else script_to_run
 
 print(f"\n📌 Fichier fautif : {faulty_file}")
 
-# Rendre absolu si nécessaire
 if not os.path.isabs(faulty_file):
     faulty_file = os.path.join(project_path, faulty_file)
 
@@ -95,7 +94,7 @@ if not os.path.exists(faulty_file):
     sys.exit(1)
 
 # =========================
-# 6) Charger le code fautif
+# 6) Charger code fautif + construire prompt
 # =========================
 with open(faulty_file, "r", encoding="utf-8") as f:
     faulty_code = f.read()
@@ -108,17 +107,16 @@ messages = [
 ]
 
 # =========================
-# 7) Appel modèle Groq
+# 7) Appel modèle
 # =========================
 completion = client.chat.completions.create(
     model="llama-3.1-8b-instant",
     messages=messages,
-    max_tokens=2000,
+    max_tokens=1500,
     temperature=0
 )
 
 response_text = completion.choices[0].message.content
-
 print("\n=== Réponse brute du modèle ===")
 print(response_text)
 
@@ -126,7 +124,7 @@ with open(OUTPUT_JSON, "w", encoding="utf-8") as f:
     f.write(response_text)
 
 # =========================
-# 8) Parser JSON
+# 8) Parser le JSON
 # =========================
 try:
     patch_data = json.loads(response_text)
@@ -138,14 +136,15 @@ patch_code = patch_data.get("patch")
 diagnostic = patch_data.get("diagnostic", "")
 
 if not patch_code:
-    print("❌ Aucun champ 'patch' trouvé.")
+    print("❌ Pas de champ 'patch' dans la réponse.")
     sys.exit(1)
 
 # =========================
-# 8.5 Déséchappage agressif
+# 8.5 Déséchappage agressif si patch encodé
 # =========================
 def aggressively_unescape_patch(text):
-    if "\\n" in text or "\\t" in text or "\\\"" in text:
+    """ Convertit une string JSON échappée en code Python lisible """
+    if "\\n" in text or "\\\"" in text or "\\t" in text:
         try:
             return json.loads(text)
         except:
@@ -160,20 +159,19 @@ def aggressively_unescape_patch(text):
 
 patch_code = aggressively_unescape_patch(patch_code)
 
-# double tentative si encore échappé
-if isinstance(patch_code, str) and "\\n" in patch_code:
+if "\\n" in patch_code:
     try:
         patch_code = json.loads(patch_code)
     except:
         pass
 
 # =========================
-# 9) Affichage utilisateur
+# 9) Affichage + Confirmation utilisateur
 # =========================
 print("\n=== CORRECTION PROPOSÉE ===")
 print("\n--- Diagnostic ---")
 print(diagnostic)
-print("\n--- Patch ---\n")
+print("\n--- Patch complet ---\n")
 print(patch_code)
 print("\n------------------------------------------\n")
 
@@ -183,14 +181,14 @@ if confirm not in ("o", "oui", "y"):
     sys.exit(0)
 
 # =========================
-# 10) Appliquer via apply_patch
+# 10) Application du patch via apply_patch.py
 # =========================
-apply_patch(faulty_file, patch_code, project_path)
+apply_patch(faulty_file, patch_code)
 
 # =========================
-# 11) Réexécuter le script
+# 11) Réexécution
 # =========================
-print("\n🔄 Réexécution...\n")
+print("\n🔄 Re-exécution...\n")
 completed_after = subprocess.run(
     [python_interpreter, script_to_run],
     capture_output=True,
