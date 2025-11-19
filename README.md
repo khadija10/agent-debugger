@@ -219,3 +219,74 @@ Voici une description de l'interface proposée, utilisant Streamlit :
 
 Cette interface rend l'outil accessible et intuitif, permettant une configuration facile et un suivi visuel des erreurs et corrections.
 
+## Étape 8 — Construire votre propre agent de debugging
+
+Maintenant que vous connaissez toutes les briques, vous commencerez votre outil.
+Vous devrez organiser votre projet en modules :
+
+Faites un plan de votre projet :
+nom des modules, rôle de chacun, données échangées.
+
+### Modules et rôles
+- **config.py** : Gère la configuration de l'agent. Lit et écrit le fichier `config.json` pour stocker les chemins du projet et de l'environnement virtuel. Rôle : Centraliser la gestion des paramètres persistants.
+- **executor.py** : Responsable de l'exécution des scripts dans l'environnement virtuel. Utilise `subprocess` pour lancer le script et capturer stdout/stderr. Rôle : Exécuter les scripts en toute sécurité et récupérer les erreurs.
+- **ai_analyzer.py** : Gère l'interaction avec le modèle d'IA. Envoie le code et l'erreur à l'IA, reçoit la réponse JSON. Rôle : Analyser les erreurs via l'IA et obtenir des propositions de correction.
+- **patcher.py** : Applique les corrections au code source. Compare le code original avec la version corrigée et modifie uniquement les parties erronées. Rôle : Modifier les fichiers de manière contrôlée et sûre.
+- **ui.py** : Interface utilisateur avec Streamlit. Permet de configurer, sélectionner des scripts, afficher les erreurs et corrections. Rôle : Fournir une interface intuitive pour l'utilisateur final.
+
+### Données échangées
+- **config.py** : Échange des dictionnaires JSON (chemins) avec ui.py et les autres modules pour la configuration.
+- **executor.py** : Reçoit le chemin du script (string) et le chemin de l'interpréteur (string) ; retourne stdout (string), stderr (string).
+- **ai_analyzer.py** : Reçoit le code (string) et l'erreur (string) ; retourne un JSON (dict) avec diagnostic, patch, confidence.
+- **patcher.py** : Reçoit le chemin du fichier (string) et le patch (string) ; applique les modifications sans retour direct (confirmation via exceptions).
+- **ui.py** : Coordonne les appels aux autres modules, affiche les résultats (strings, JSON) et gère les interactions utilisateur.
+
+```
+agent-debugger/
+│
+├── agent/
+│   ├── agent.py
+│   ├── apply_patch.py
+│   ├── context.txt
+│   ├── prompt.txt
+│   ├── config.json
+│   ├── last_patch.json
+│
+├── scripts/
+│   ├── script_a.py
+│   │
+│   └── backups/
+│       └── script_a.py.bak
+│
+├── data_env/                 (ton venv Python)
+│   ├── Scripts/
+│   │   ├── python.exe
+│   │   └── ... (pip, activate, etc.)
+│   └── Lib/
+│       └── site-packages/    (packages installés)
+│
+├── .env                      (GROQ_API_KEY)
+├── requirements.txt          (optionnel)
+│
+└── README.md                 (optionnel)
+```
+
+## Étape 9 — Comprendre les limites et risques
+
+Un débuggeur automatisé pose des problèmes techniques et de sécurité. Voici 5 risques identifiés avec une solution pour chacun :
+
+1. **Erreur du modèle IA** : L'IA peut proposer des corrections incorrectes ou inappropriées, conduisant à des bugs supplémentaires.
+   - **Solution** : Implémenter une validation manuelle pour les corrections avec une confiance faible (< 0.7), et ajouter des tests automatiques pour vérifier la correction avant application.
+
+2. **Mauvaise interprétation du code** : L'IA peut mal comprendre le contexte du code, les variables ou la logique, menant à des modifications inadéquates.
+   - **Solution** : Enrichir le prompt avec plus de contexte (commentaires, structure du projet), et limiter les modifications aux lignes directement liées à l'erreur.
+
+3. **Application automatique dangereuse** : L'application automatique de corrections peut casser le code existant ou introduire des vulnérabilités.
+   - **Solution** : Toujours créer des sauvegardes avant modification, et exiger une confirmation utilisateur pour l'application automatique, en affichant un aperçu des changements.
+
+4. **Dépendances manquantes** : Le script peut nécessiter des packages non installés dans l'environnement virtuel, causant des erreurs d'importation.
+   - **Solution** : Analyser les imports du script et vérifier/installer les dépendances manquantes dans le venv avant exécution, en utilisant pip.
+
+5. **Chemins invalides** : Les chemins configurés (projet, venv) peuvent être incorrects ou inexistants, empêchant l'exécution.
+   - **Solution** : Valider l'existence et l'accessibilité des chemins au démarrage, afficher des messages d'erreur clairs, et permettre la reconfiguration via l'interface.
+

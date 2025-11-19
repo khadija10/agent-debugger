@@ -1,64 +1,94 @@
-import json
-import sys
 import os
 from shutil import copyfile
 
-def apply_patch_line_by_line(json_file, target_file):
-    """Applique un patch JSON ligne par ligne sur un fichier Python."""
-    
-    if not os.path.exists(json_file):
-        print(f"❌ Fichier JSON introuvable : {json_file}")
-        return
+def apply_patch(script_path: str, patch_code: str):
+    """
+    Applique un patch MINIMAL :
+    - Ne remplace que la fonction corrigée
+    - Ignore TOUT ce qui est en dehors de la fonction (ex: result = ...)
+    - Place les sauvegardes dans scripts/backups/
+    """
 
-    if not os.path.exists(target_file):
-        print(f"❌ Fichier cible introuvable : {target_file}")
-        return
+    if not os.path.exists(script_path):
+        raise FileNotFoundError(f"Script introuvable : {script_path}")
 
-    # Charger le JSON
-    try:
-        with open(json_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        print("❌ Impossible de lire le JSON :", e)
-        return
+    # ===========================
+    # 1) Créer dossier backups
+    # ===========================
+    script_dir = os.path.dirname(script_path)
+    backup_dir = os.path.join(script_dir, "backups")
 
-    patch_code = data.get("patch")
-    if not patch_code:
-        print("❌ Le JSON ne contient pas de champ 'patch'.")
-        return
+    if not os.path.exists(backup_dir):
+        os.makedirs(backup_dir)
 
-    # Créer un backup du fichier cible
-    backup_file = target_file + ".bak"
-    copyfile(target_file, backup_file)
-    print(f"💾 Backup créé : {backup_file}")
+    script_name = os.path.basename(script_path)
+    backup_path = os.path.join(backup_dir, script_name + ".bak")
 
-    # Lire le fichier original
-    with open(target_file, "r", encoding="utf-8") as f:
-        original_lines = f.readlines()
+    # Sauvegarde propre
+    copyfile(script_path, backup_path)
+    print(f"💾 Backup créé : {backup_path}")
 
-    patched_lines = patch_code.splitlines(keepends=True)
+    # ===========================
+    # 2) Lire fichier original
+    # ===========================
+    with open(script_path, "r", encoding="utf-8") as f:
+        original = f.readlines()
 
-    # Appliquer le patch ligne par ligne
-    new_lines = []
-    max_len = max(len(original_lines), len(patched_lines))
-    for i in range(max_len):
-        patched_line = patched_lines[i] if i < len(patched_lines) else ""
-        orig_line = original_lines[i] if i < len(original_lines) else ""
-        new_lines.append(patched_line if patched_line != orig_line else orig_line)
+    # ===========================
+    # 3) Extraire la fonction du patch
+    # ===========================
+    patch_lines = patch_code.splitlines()
 
-    # Écrire le fichier corrigé
-    with open(target_file, "w", encoding="utf-8") as f:
-        f.writelines(new_lines)
+    func_start = None
+    for i, line in enumerate(patch_lines):
+        if line.strip().startswith("def "):
+            func_start = i
+            break
 
-    print(f"✅ Patch appliqué avec succès à {target_file}")
+    if func_start is None:
+        print("❌ Patch invalide : aucune fonction trouvée")
+        return False
 
+    func_name = patch_lines[func_start].strip().split()[1].split("(")[0]
 
-if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage : python apply_patch.py patch.json fichier_cible.py")
-        sys.exit(1)
+    # extraire uniquement le bloc de fonction
+    func_block = []
+    for line in patch_lines[func_start:]:
+        if line.startswith("def ") and len(func_block) > 0:
+            break
+        func_block.append(line)
 
-    json_file = sys.argv[1]
-    target_file = sys.argv[2]
+    patched = [(l if l.endswith("\n") else l + "\n") for l in func_block]
 
-    apply_patch_line_by_line(json_file, target_file)
+    # ===========================
+    # 4) Localiser la fonction originale
+    # ===========================
+    start = None
+    for i, line in enumerate(original):
+        if line.strip().startswith(f"def {func_name}("):
+            start = i
+            break
+
+    if start is None:
+        print(f"⚠️ Fonction {func_name} introuvable → ajout à la fin.")
+        new = original + ["\n"] + patched
+
+    else:
+        # trouver fin du bloc existant
+        end = start + 1
+        while end < len(original) and (
+            original[end].startswith(" ") or original[end].startswith("\t")
+        ):
+            end += 1
+
+        # Remplacement propre
+        new = original[:start] + patched + original[end:]
+
+    # ===========================
+    # 5) Écrire fichier final
+    # ===========================
+    with open(script_path, "w", encoding="utf-8") as f:
+        f.writelines(new)
+
+    print(f"✅ Fonction {func_name} corrigée dans {script_path}")
+    return True
